@@ -86,6 +86,10 @@ class TestSlackClient extends SlackClient {
       return { ok: true };
     }
 
+    if (method === 'files.delete') {
+      return { ok: true };
+    }
+
     if (method === 'saved.add' || method === 'saved.update') {
       return { ok: true, item: { item_id: params.item_id, item_type: 'message', ts: params.ts } };
     }
@@ -781,7 +785,68 @@ describe('SlackClient.getUnreadThreadView', () => {
   });
 });
 
+describe('SlackClient.uploadFilesExternal without a channel (#507)', () => {
+  it('completes the upload with no channel_id, so the files stay private and unshared', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'slackcli-private-upload-'));
+    const a = join(dir, 'a.png');
+    const b = join(dir, 'b.png');
+    await Bun.write(a, 'alpha');
+    await Bun.write(b, 'bravo');
+    globalThis.fetch = (async () => new Response('', { status: 200 })) as unknown as typeof fetch;
+
+    try {
+      const client = new TestSlackClient();
+      const result = await client.uploadFilesExternal(undefined, [a, b]);
+
+      expect(client.calls.at(-1)).toEqual({
+        method: 'files.completeUploadExternal',
+        params: { files: JSON.stringify([{ id: 'F1', title: 'a.png' }, { id: 'F2', title: 'b.png' }]) },
+      });
+      expect(result.files?.map((f) => f.id)).toEqual(['F1', 'F2']);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a comment or thread without a channel before any Slack call', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'slackcli-private-comment-'));
+    const a = join(dir, 'a.png');
+    await Bun.write(a, 'alpha');
+
+    try {
+      const client = new TestSlackClient();
+      await expect(client.uploadFilesExternal(undefined, [a], { initial_comment: 'hi' })).rejects.toThrow(InvalidInputError);
+      await expect(client.uploadFilesExternal(undefined, [a], { thread_ts: '1712345678.000100' })).rejects.toThrow(
+        InvalidInputError,
+      );
+      expect(client.calls).toEqual([]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('SlackClient.deleteFile', () => {
+  it('calls files.delete with the file id', async () => {
+    const client = new TestSlackClient();
+    await client.deleteFile('F123');
+    expect(client.calls).toEqual([{ method: 'files.delete', params: { file: 'F123' } }]);
+  });
+});
+
 describe('SlackClient.createDraft', () => {
+  it('sends an empty file_ids list for a text-only draft', async () => {
+    const client = new TestSlackClient();
+    await client.createDraft('C123', 'hi');
+    expect(client.calls[0]?.params.file_ids).toBe('[]');
+  });
+
+  it('attaches the given file ids to the draft (#507)', async () => {
+    const client = new TestSlackClient();
+    await client.createDraft('C123', 'hi', { file_ids: ['F1', 'F2'] });
+    expect(client.calls[0]?.params.file_ids).toBe(JSON.stringify(['F1', 'F2']));
+  });
+
   it('sends mentions and links as rich_text elements, not literal text', async () => {
     const client = new TestSlackClient();
 

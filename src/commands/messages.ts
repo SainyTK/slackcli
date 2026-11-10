@@ -32,6 +32,7 @@ import { resolveMessageText } from '../lib/message-input.ts';
 import { parseScheduleTime } from '../lib/schedule-time.ts';
 import { deleteMessage, removeReaction } from '../lib/message.ts';
 import { resolvePostThread } from '../lib/thread-parent.ts';
+import { checkDraftFiles, createDraftWithFiles, DRAFT_FILE_LIMIT, type DraftFile } from '../lib/draft-files.ts';
 
 // Help text shared by several commands below.
 const THREAD_TS_NOTE =
@@ -218,8 +219,10 @@ const HELP = {
     examples: [
       'slackcli messages draft --recipient-id C0123456789 --message "Release notes for review"',
       'slackcli messages draft --permalink https://acme.slack.com/archives/C0123456789/p1712345678123456 --message-file ./reply.md --json',
+      'slackcli messages draft --recipient-id C0123456789 --message "Charts for review" --file a.png --file b.png',
     ],
-    json: '{ channel_id, draft_id, thread_ts? } (thread_ts only for a threaded draft).',
+    json:
+      '{ channel_id, draft_id, thread_ts?, file_ids? } (thread_ts only for a threaded draft, file_ids only with --file).',
     browserOnly: true,
     notes: [
       RECIPIENT_NOTE,
@@ -231,6 +234,9 @@ const HELP = {
       REPLY_LINK_NOTE,
       MESSAGE_TEXT_NOTE,
       STDIN_NOTE,
+      `--file is repeatable, up to ${DRAFT_FILE_LIMIT} files. They are uploaded privately and stay unshared ` +
+        'until a human sends the draft from Slack; send-draft refuses a draft with files. Every path is ' +
+        'checked before the first upload, and the uploads are deleted again if the draft cannot be created.',
       'Creates the draft immediately, with no confirmation prompt.',
     ],
     dryRun: true,
@@ -1015,6 +1021,11 @@ export function createMessagesCommand(): Command {
     )
     .option('--thread-ts <timestamp>', 'Thread to draft a reply in (1234567890.123456 or p1234567890123456)')
     .option('--permalink <url>', 'Slack message link; drafts a reply in that message\'s thread (replaces --recipient-id and --thread-ts)')
+    .addOption(
+      // Repeatable, like `messages send --file`: the collector always yields an array.
+      new Option('--file <path>', `Attach a file to the draft (repeatable, up to ${DRAFT_FILE_LIMIT} files)`)
+        .argParser<string[]>((value, previous) => (previous ?? []).concat([value]))
+    )
     .option('--workspace <id|name>', 'Workspace to use')
     .option('--json', 'Output the created draft as JSON', false)
     .option(DRY_RUN_FLAG, DRY_RUN_DESCRIPTION, false)
@@ -1023,13 +1034,18 @@ export function createMessagesCommand(): Command {
 
       try {
         const message = await resolveMessageText(options);
+        // Check every file before any Slack call, so a bad path costs nothing.
+        const files: DraftFile[] | undefined = options.file ? await checkDraftFiles(options.file) : undefined;
         const { client, recipientId, target } = await resolveRecipient(options, spinner);
+        // Refuse an app token before uploading anything, not after.
+        client.requireBrowserAuth(DRAFT_CREATE_AUTH_MESSAGE);
 
         if (options.dryRun) {
-          client.requireBrowserAuth(DRAFT_CREATE_AUTH_MESSAGE);
           spinner.stop();
+          const payload: Record<string, unknown> = { text: message };
+          if (files) payload.files = files.map((f) => ({ name: f.filename, size: f.size }));
           emitDryRun(
-            await buildPreview(client, 'create draft', recipientTarget(recipientId, target.threadTs), { text: message }, { lookupName: true }),
+            await buildPreview(client, 'create draft', recipientTarget(recipientId, target.threadTs), payload, { lookupName: true }),
             options.json,
           );
           return;
@@ -1037,10 +1053,19 @@ export function createMessagesCommand(): Command {
 
         const channelId = await openRecipient(client, recipientId, spinner);
 
-        spinner.text = 'Creating draft...';
-        const response = await client.createDraft(channelId, message, {
-          thread_ts: target.threadTs,
-        });
+        let draftId: string;
+        let fileIds: string[] | undefined;
+        if (files) {
+          spinner.text = files.length === 1 ? 'Uploading 1 file...' : `Uploading ${files.length} files...`;
+          ({ draftId, fileIds } = await createDraftWithFiles(client, channelId, message, {
+            thread_ts: target.threadTs,
+            files,
+          }));
+        } else {
+          spinner.text = 'Creating draft...';
+          const response = await client.createDraft(channelId, message, { thread_ts: target.threadTs });
+          draftId = response.draft.id;
+        }
 
         spinner.succeed('Draft created successfully!');
         if (options.json) {
@@ -1048,11 +1073,13 @@ export function createMessagesCommand(): Command {
           // draft id is what a follow-up call has to work with.
           writeJson({
             channel_id: channelId,
-            draft_id: response.draft.id,
+            draft_id: draftId,
             ...(target.threadTs ? { thread_ts: target.threadTs } : {}),
+            ...(fileIds ? { file_ids: fileIds } : {}),
           });
         } else {
-          success(`Draft ID: ${response.draft.id}`);
+          success(`Draft ID: ${draftId}`);
+          if (fileIds) success(fileIds.length === 1 ? '1 file attached' : `${fileIds.length} files attached`);
         }
       } catch (err: any) {
         failCommand(err, { json: options.json, spinner, context: 'Failed to create draft' });

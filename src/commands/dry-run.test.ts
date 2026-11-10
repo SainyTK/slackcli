@@ -352,6 +352,22 @@ describe('--dry-run', () => {
     expect(methods).toEqual(['conversations.info']);
   });
 
+  it('shows the files a draft would attach, uploading nothing (#507)', async () => {
+    const a = join(dir, 'a.png');
+    const b = join(dir, 'b.png');
+    await Bun.write(a, 'alpha');
+    await Bun.write(b, 'bo');
+    const preview = await runJson(['messages', 'draft', '--recipient-id', 'C0123456789', '--message', 'Charts', '--file', a, '--file', b]);
+    expect(preview.payload).toEqual({ text: 'Charts', files: [{ name: 'a.png', size: 5 }, { name: 'b.png', size: 2 }] });
+    expect(methods).toEqual(['conversations.info']);
+  });
+
+  it('refuses a missing draft file before any Slack call', async () => {
+    const error = await failJson(['messages', 'draft', '--recipient-id', 'C0123456789', '--message', 'x', '--file', join(dir, 'nope.png')]);
+    expect(error.code).toBe('invalid_input');
+    expect(methods).toEqual([]);
+  });
+
   it('shows a draft to send with its thread and text', async () => {
     const preview = await runJson(['messages', 'send-draft', 'Dr0123456789']);
     expect(preview.target).toEqual({ kind: 'channel', id: 'C0123456789', name: '#deploys', thread_ts: '1712345678.000100' });

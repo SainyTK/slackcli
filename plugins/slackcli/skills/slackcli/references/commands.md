@@ -81,7 +81,7 @@ messages edit (--channel-id=C --timestamp=TS | --permalink=URL) (--message=T | -
 messages delete (--channel-id=C --timestamp=TS | --permalink=URL) [--yes] [--json]   # chat.delete; retry-safe
 messages react (--channel-id=C --timestamp=TS | --permalink=URL) --emoji=NAME [--json]
 messages unreact (--channel-id=C --timestamp=TS | --permalink=URL) --emoji=NAME [--json]   # reactions.remove, your own reaction only; retry-safe
-messages draft --recipient-id=C (--message=T | --message-file=F|-) [--json]    # browser auth only
+messages draft --recipient-id=C (--message=T | --message-file=F|-) [--file=P]... [--json]  # browser auth only; up to 10 files
 messages send-draft Dr… [--yes] [--json]                                     # post, then delete draft
 messages delete-draft Dr… [--yes] [--json]                                   # discard draft
 messages list-drafts [--limit=100] [--json]                                  # browser auth only
@@ -97,7 +97,7 @@ share one message, all-or-nothing) and is exclusive with `--blocks`. `--emoji` w
 colons. Only the authenticated identity's messages can be edited or deleted.
 JSON: `send` → `{channel_id, ts, permalink?}` (`permalink` omitted if lookup fails);
 with `--file` → `{channel_id, file_id, file_ids}` (`file_id` is the first of `file_ids`). `edit` → `{channel_id, ts}`. `delete` → `{channel_id,ts,deleted,already_deleted}`
-(`message_not_found` exits 0 with `deleted:false,already_deleted:true`). `draft` → `{channel_id, draft_id}`.
+(`message_not_found` exits 0 with `deleted:false,already_deleted:true`). `draft` → `{channel_id, draft_id, thread_ts?, file_ids?}`.
 `list-drafts` → `{draft_count, drafts[]{draft_id,channel_id,text,date_created,file_ids,thread_ts?,date_scheduled?}}`.
 `send-draft` → `{channel_id,ts,permalink?}`; on cleanup failure it also returns
 `cleanup_error` and exits nonzero. `delete-draft` → `{draft_id,deleted:true}`.

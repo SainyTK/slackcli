@@ -411,14 +411,34 @@ broadcast tokens (`<@U…>`, `<!subteam^S…>`, `<#C…>`, `<!here>`) and links
 literal. `--message-file` works here exactly as
 it does on `messages send`, including `-` for standard input.
 
+### Files on a draft (`--file`)
+
+```bash
+slackcli messages draft --recipient-id=C1234567890 --message="Charts for review" \
+  --file chart.png --file table.csv
+```
+
+`--file` is repeatable, up to 10 files, the most Slack's composer takes for one
+message. The files are uploaded privately: nobody sees them until a human sends
+the draft from Slack. `send-draft` refuses a draft with files, because sending
+one is left to the person who reviews it.
+
+Every path is checked before the first upload. A missing, empty or non-regular
+file, a path given twice, or more than 10 files fails with `invalid_input` and
+uploads nothing. `--dry-run` lists each file's name and size without uploading.
+If the draft cannot be created after the upload, the uploaded files are deleted
+again; any that could not be deleted are named in the error.
+
 `--json` prints the draft's identity. A draft is unsent, so it has no message
 timestamp and no permalink — the draft id is what a follow-up has to work with.
-`thread_ts` is present only when the draft is a threaded reply.
+`thread_ts` is present only when the draft is a threaded reply, and `file_ids`
+only when the draft carries files.
 
 ```json
 {
   "channel_id": "C1234567890",
-  "draft_id": "1234567890.123456"
+  "draft_id": "1234567890.123456",
+  "file_ids": ["F0123456789", "F0123456790"]
 }
 ```
 

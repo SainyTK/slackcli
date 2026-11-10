@@ -167,6 +167,7 @@ slackcli messages send --permalink="$LINK" --message="On it 👀"
 | Inspect or download a Slack file | `slackcli files info F123` | [files](docs/user-guide/files.md) |
 | Upload a file with a message | `slackcli messages send --file=./report.pdf …` | [messages](docs/user-guide/messages.md) |
 | Post rich Block Kit content | `slackcli messages send --blocks=@blocks.json …` | [messages](docs/user-guide/messages.md) |
+| Draft a message with files for a human to send | `slackcli messages draft --file=./chart.png …` | [messages](docs/user-guide/messages.md#files-on-a-draft---file) |
 | Review active drafts | `slackcli messages list-drafts` | [messages](docs/user-guide/messages.md) |
 | Post a message later | `slackcli messages schedule --in=2h …` | [messages](docs/user-guide/messages.md#messages-schedule) |
 | Script it / feed an AI agent | `… --json \| jq` | [scripting & JSON](docs/user-guide/scripting.md) |

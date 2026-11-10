@@ -699,12 +699,20 @@ export class SlackClient {
   // error's type and slackData intact. Slack never shares an upload ticket that
   // completeUpload did not reference, so a mid-way failure leaves no partial
   // message posted.
-  async uploadFilesExternal(channel: string, filePaths: string[], options: {
+  //
+  // With no channel (undefined), completeUploadExternal gets no channel_id, so
+  // the files stay private to the uploader and unshared: `messages draft
+  // --file` attaches them to a draft that a human sends later (#507). A
+  // comment or thread needs a channel, so they are refused without one.
+  async uploadFilesExternal(channel: string | undefined, filePaths: string[], options: {
     initial_comment?: string;
     thread_ts?: string;
   } = {}): Promise<ExternalUploadCompleteResponse> {
     if (filePaths.length === 0) {
       throw new InvalidInputError('No files to upload');
+    }
+    if (channel === undefined && (options.initial_comment || options.thread_ts)) {
+      throw new InvalidInputError('A private upload has no channel, so it cannot carry a comment or thread');
     }
 
     // Validate every file before any Slack call, so a bad path aborts the whole
@@ -759,19 +767,19 @@ export class SlackClient {
       uploaded.push({ id: uploadUrlResponse.file_id, title: filename });
     }
 
-    const params: Record<string, string> = {
-      files: JSON.stringify(uploaded),
-      channel_id: channel,
-    };
+    const params: Record<string, string> = { files: JSON.stringify(uploaded) };
+    if (channel !== undefined) params.channel_id = channel;
     if (options.initial_comment) params.initial_comment = options.initial_comment;
     if (options.thread_ts) params.thread_ts = options.thread_ts;
 
     return this.request('files.completeUploadExternal', params);
   }
 
-  // Create draft message
+  // Create draft message. file_ids are files uploaded privately (no channel)
+  // with uploadFilesExternal; Slack attaches them to the draft's composer.
   async createDraft(channelId: string, text: string, options: {
     thread_ts?: string;
+    file_ids?: string[];
   } = {}): Promise<any> {
     this.requireBrowserAuth(DRAFT_CREATE_AUTH_MESSAGE);
 
@@ -785,11 +793,17 @@ export class SlackClient {
       client_msg_id: crypto.randomUUID(),
       blocks: JSON.stringify(parseMrkdwn(text)),
       destinations: JSON.stringify(destinations),
-      file_ids: '[]',
+      file_ids: JSON.stringify(options.file_ids ?? []),
       is_from_composer: 'false',
     };
 
     return this.request('drafts.create', params);
+  }
+
+  // Delete a file the authenticated user uploaded. `messages draft --file` uses
+  // it to remove its private uploads when the draft itself cannot be created.
+  async deleteFile(fileId: string): Promise<void> {
+    await this.request('files.delete', { file: fileId });
   }
 
   // List active drafts (browser auth only; Slack has no public API for drafts).
